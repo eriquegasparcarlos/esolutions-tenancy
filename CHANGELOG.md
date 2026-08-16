@@ -54,3 +54,15 @@ Cierra los dos hallazgos restantes de la revisión externa:
   (null = sin filtro SQL), y `each()` re-verifica SIEMPRE con el contrato `isTenantActive()` — la
   columna es la optimización, el contrato es la verdad.
 - Suite: 42 tests (nueva `ResolutionFreshnessTest`).
+
+## 0.4.0 — 2026-08-16
+
+- **Fix de seguridad — prioridad de middleware**: el grupo `tenant` ahora se inserta en la lista de
+  prioridad del kernel HTTP, DESPUÉS de `StartSession` y ANTES de `auth`
+  (`AuthenticatesRequests`) y de `SubstituteBindings`. Sin esto, el route-model-binding y la carga
+  del usuario autenticado consultaban la BD **antes** de que `ResolveTenant` fijara el contexto:
+  con el singleton "sucio" del request anterior (tests, Octane) resolvían filas de OTRO tenant —
+  IDOR silencioso. Detectado por el test IDOR del módulo Company de qpospev3.
+- Efecto visible: una sesión estampada con otro tenant ahora se purga (y desloguea) **antes** del
+  chequeo de `auth` — el request cruzado da `401` en vez de autenticarse y purgarse tarde.
+- Suite: 43 tests (nueva `MiddlewarePriorityTest`, regresión del orden en el kernel).

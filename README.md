@@ -125,6 +125,12 @@ El grupo `tenant` se registra solo y aplica, **en este orden**:
 > dominio padre: sin esto, una sesión abierta en `acme.miapp.com` seguiría siendo válida en
 > `globex.miapp.com` y el usuario quedaría autenticado en otra empresa.
 
+El paquete además declara la **prioridad** del trío en el kernel HTTP: corre después de
+`StartSession` y **antes de `auth` y de `SubstituteBindings`**. Esto garantiza que el contexto de
+tenant ya está fijado cuando el route-model-binding y el guard de autenticación tocan la base — sin
+esa prioridad, ambos usarían el contexto del request anterior (tests, Octane) y podrían resolver
+filas de otro tenant. No hay que configurar nada: basta `Route::middleware(['web', 'tenant'])`.
+
 ### 3. Cron / tareas programadas
 
 En single-DB una tarea corre **una vez** para todas las empresas, así que hay que iterar:

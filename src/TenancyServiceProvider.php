@@ -134,5 +134,26 @@ class TenancyServiceProvider extends ServiceProvider
             ResolveTenant::class,
             ScopeSessionToTenant::class,
         ]);
+
+        /*
+         * Prioridad: el trío corre DESPUÉS de StartSession (ScopeSessionToTenant necesita sesión)
+         * pero ANTES de `auth` y de SubstituteBindings. Sin esto, el route-model-binding y la carga
+         * del usuario autenticado consultan la BD ANTES de que ResolveTenant fije el contexto: con
+         * el singleton "sucio" de un request anterior (tests, Octane) resolverían filas de OTRO
+         * tenant — IDOR silencioso.
+         */
+        $kernel = $this->app->make(\Illuminate\Contracts\Http\Kernel::class);
+
+        if (method_exists($kernel, 'addToMiddlewarePriorityBefore')) {
+            $before = [
+                \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+                \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            ];
+
+            // Uno por llamada (la firma acepta un solo middleware); el orden relativo se preserva.
+            $kernel->addToMiddlewarePriorityBefore($before, PreventAccessFromCentralDomain::class);
+            $kernel->addToMiddlewarePriorityBefore($before, ResolveTenant::class);
+            $kernel->addToMiddlewarePriorityBefore($before, ScopeSessionToTenant::class);
+        }
     }
 }
