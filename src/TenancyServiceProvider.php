@@ -9,6 +9,7 @@ use Esolutions\Tenancy\Http\Middleware\PreventAccessFromCentralDomain;
 use Esolutions\Tenancy\Http\Middleware\ResolveTenant;
 use Esolutions\Tenancy\Http\Middleware\ScopeSessionToTenant;
 use Esolutions\Tenancy\Queue\TenantQueueBootstrapper;
+use Esolutions\Tenancy\Tenancy;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 
@@ -36,6 +37,7 @@ class TenancyServiceProvider extends ServiceProvider
 
         $this->registerMiddlewareGroup();
         $this->registerQueueTenancy();
+        $this->registerResolutionCacheInvalidation();
 
         if ($this->app->runningInConsole()) {
             $this->commands([TenantsRunCommand::class]);
@@ -81,6 +83,37 @@ class TenancyServiceProvider extends ServiceProvider
         }
 
         (new TenantQueueBootstrapper($this->app))->bootstrap();
+    }
+
+    /**
+     * Invalida el cache host→tenant cuando cambian los datos que lo alimentan (dominios, slug).
+     * Sin esto, re-puntear un dominio tardaría hasta el TTL en aplicar. (Desactivar un tenant NO
+     * depende de esto: el estado se lee fresco en cada request — solo se cachea el ID.)
+     */
+    private function registerResolutionCacheInvalidation(): void
+    {
+        $tenantModel = config('tenancy.tenant_model');
+        $domainModel = config('tenancy.domain_model');
+
+        if (class_exists($tenantModel)) {
+            $flush = fn ($tenant) => Tenancy::flushResolutionCache($tenant);
+            $tenantModel::saved($flush);
+            $tenantModel::deleted($flush);
+        }
+
+        if (class_exists($domainModel)) {
+            $flushHosts = function ($domain) {
+                Tenancy::flushHost($domain->domain);
+
+                // Si el dominio fue RENOMBRADO, la clave vieja también debe morir.
+                $original = $domain->getOriginal('domain');
+                if ($original && $original !== $domain->domain) {
+                    Tenancy::flushHost($original);
+                }
+            };
+            $domainModel::saved($flushHosts);
+            $domainModel::deleted($flushHosts);
+        }
     }
 
     /**

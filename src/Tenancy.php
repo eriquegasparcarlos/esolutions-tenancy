@@ -18,12 +18,57 @@ use Throwable;
  */
 class Tenancy
 {
-    /** Query de tenants activos (el modelo de tenant no lleva TenantScope). */
+    /**
+     * Query de tenants activos (el modelo de tenant no lleva TenantScope).
+     *
+     * La columna sale de `tenancy.active_column` (default `is_active`); con `null` no se filtra en
+     * SQL y decide solo el contrato. En cualquier caso, {@see each()} re-verifica con
+     * `isTenantActive()` — el contrato es la verdad, la columna es solo la optimización.
+     */
     public static function query(): Builder
     {
         $model = config('tenancy.tenant_model');
+        $query = $model::query();
 
-        return $model::query()->where('is_active', true);
+        if ($column = config('tenancy.active_column', 'is_active')) {
+            $query->where($column, true);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Invalida el cache de resolución host→tenant de una empresa (sus dominios registrados + su
+     * subdominio canónico). Lo disparan los observers del provider al guardar/borrar
+     * tenants/dominios; también puede llamarse a mano tras cambios exóticos.
+     *
+     * Nota: hosts ARBITRARIOS resueltos por subdominio (acme.<otro-dominio>) pueden seguir
+     * cacheados hasta el TTL — pero como solo se cachea el ID (no el estado), eso únicamente
+     * retrasa re-punteos de dominio, nunca una desactivación.
+     */
+    public static function flushResolutionCache(mixed $tenant): void
+    {
+        $hosts = method_exists($tenant, 'domains')
+            ? $tenant->domains()->pluck('domain')->all()
+            : [];
+
+        $slug = $tenant->{config('tenancy.slug_column', 'slug')} ?? null;
+
+        if ($slug) {
+            $hosts[] = $slug.'.'.config('tenancy.base_domain');
+        }
+
+        foreach (array_unique($hosts) as $host) {
+            static::flushHost($host);
+        }
+    }
+
+    /** Invalida el mapeo cacheado de UN host. Corre sin prefijo de tenant (la clave es global). */
+    public static function flushHost(string $host): void
+    {
+        app(TenantContext::class)->runAsSystem(
+            fn () => cache()->forget("tenancy:host:{$host}")
+        );
     }
 
     /**
@@ -90,6 +135,12 @@ class Tenancy
 
         $query->chunkById(100, function ($tenants) use ($context, $callback, $onError) {
             foreach ($tenants as $tenant) {
+                // El contrato es la verdad: si el modelo define su propia noción de "activo"
+                // (isTenantActive), se respeta aunque la columna de la query diga otra cosa.
+                if (! $tenant->isTenantActive()) {
+                    continue;
+                }
+
                 try {
                     $context->runAs($tenant, $callback);
                 } catch (Throwable $e) {

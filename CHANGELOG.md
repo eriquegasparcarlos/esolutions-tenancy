@@ -40,3 +40,17 @@ extracción mínimo).
   arrow functions no queden sin tenant.
 
 > 0.x: la API puede cambiar mientras se estabiliza con el primer consumidor real (qpospev3).
+
+## 0.3.0 — 2026-08-16
+
+Cierra los dos hallazgos restantes de la revisión externa:
+
+- **Frescura de resolución con cache**: se cachea solo el mapeo host→id; el modelo del tenant se
+  lee fresco en cada request. Desactivar/borrar una cuenta aplica DE INMEDIATO (antes, hasta 5 min
+  con el TTL por defecto). Observers sobre tenant/dominios invalidan las claves al re-puntear o
+  crear dominios (incluye el sentinel de 404 cacheado). `Tenancy::flushResolutionCache()` /
+  `flushHost()` disponibles para casos manuales.
+- **`Tenancy::query()` ya no hardcodea `is_active`**: la columna sale de `tenancy.active_column`
+  (null = sin filtro SQL), y `each()` re-verifica SIEMPRE con el contrato `isTenantActive()` — la
+  columna es la optimización, el contrato es la verdad.
+- Suite: 42 tests (nueva `ResolutionFreshnessTest`).

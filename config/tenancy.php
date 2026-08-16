@@ -20,6 +20,13 @@ return [
     // Columna del tenant usada para resolver por subdominio.
     'slug_column' => 'slug',
 
+    /*
+    | Columna que filtra tenants activos en Tenancy::query()/each()/tenants:run (optimización SQL).
+    | Con null no se filtra en SQL y decide únicamente el contrato isTenantActive(), que each()
+    | re-verifica siempre de todos modos.
+    */
+    'active_column' => 'is_active',
+
     // Segundos de cache para resolver host -> tenant (0 = sin cache).
     'resolution_cache_ttl' => env('TENANCY_RESOLUTION_CACHE_TTL', 300),
 
