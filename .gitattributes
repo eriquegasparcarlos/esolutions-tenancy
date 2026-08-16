@@ -1,0 +1,5 @@
+# Lo que NO viaja en el tarball de instalación de Composer.
+/tests            export-ignore
+/phpunit.xml      export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore

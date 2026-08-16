@@ -2,6 +2,7 @@
 
 namespace Esolutions\Tenancy\Queue;
 
+use Esolutions\Tenancy\Contracts\Tenant;
 use Esolutions\Tenancy\TenantContext;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Queue\Events\JobFailed;
@@ -9,6 +10,7 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Queue\Queue;
+use RuntimeException;
 
 /**
  * Hace que las colas sean tenant-aware AUTOMÁTICAMENTE, sin traits ni cambios en los jobs.
@@ -61,17 +63,21 @@ class TenantQueueBootstrapper
             $id = $payload[self::PAYLOAD_KEY] ?? null;
 
             if ($id === null) {
-                // Job sin tenant (comando del sistema): se corre en modo system explícito para no
-                // reventar con el scope fail-closed, y sobre todo para NO heredar el tenant del
-                // job anterior que procesó este mismo worker.
+                /*
+                 * Job encolado SIN tenant (comando del sistema, o encolado desde el panel central).
+                 * Se limpia el contexto — NO se entra en modo system: si el job toca modelos de
+                 * negocio, el scope fail-closed lo hará fallar con un error claro. Eso es
+                 * deliberado: preferimos que reviente a que corra cross-tenant en silencio.
+                 *
+                 * Lo importante además es que así NO hereda el tenant del job anterior que procesó
+                 * este mismo worker.
+                 */
                 $this->context()->forget();
 
                 return;
             }
 
-            $tenant = $this->resolveTenant($id);
-
-            $this->context()->set($tenant);
+            $this->context()->set($this->resolveTenant($id));
         });
 
         $clear = fn () => $this->context()->forget();
@@ -81,11 +87,24 @@ class TenantQueueBootstrapper
         $events->listen(Looping::class, $clear); // entre jobs, el worker queda sin contexto
     }
 
-    private function resolveTenant(int|string $id): mixed
+    /**
+     * Resuelve el tenant del payload.
+     *
+     * Si el tenant ya no existe (borrado, o soft-deleted), el job queda huérfano: se falla acá con
+     * un mensaje explícito. Antes devolvía null y el job corría sin contexto, muriendo más adelante
+     * con un error del scope que no decía nada del tenant faltante.
+     *
+     * Nota: un tenant INACTIVO sí resuelve — los jobs ya encolados deben poder terminar aunque la
+     * cuenta esté suspendida (a diferencia de las requests HTTP, que ResolveTenant sí bloquea).
+     */
+    private function resolveTenant(int|string $id): Tenant
     {
         $model = config('tenancy.tenant_model');
 
-        return $model::find($id);
+        return $model::find($id) ?? throw new RuntimeException(
+            "El job referencia al tenant [{$id}], que ya no existe. Job huérfano: "
+            .'se falla en vez de ejecutarlo sin contexto.'
+        );
     }
 
     private function context(): TenantContext

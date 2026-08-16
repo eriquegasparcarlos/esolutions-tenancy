@@ -232,6 +232,28 @@ Octane::tick('flush-tenant', fn () => app(TenantContext::class)->forget());
 
 En los workers de cola esto ya está resuelto: el bootstrapper limpia el contexto entre jobs.
 
+## Suite de tests
+
+El paquete es la **frontera de aislamiento** de los sistemas que lo usan, así que trae su propia
+suite (orchestra/testbench) para que un refactor futuro no rompa el aislamiento en silencio:
+
+```bash
+composer install
+mysql -e "CREATE DATABASE esolutions_tenancy_test"
+vendor/bin/phpunit          # 37 tests
+```
+
+| Archivo | Qué garantiza |
+|---|---|
+| `IsolationTest` | A no ve/edita/borra lo de B · IDOR → null · `tenant_id` automático · fail-closed sin contexto · `runAsSystem`/`allTenants` · UNIQUE compuesto · `runAs` anidado restaura |
+| `CacheIsolationTest` | claves por tenant · `forget` no cruza · `flush()` bloqueado en tenant y permitido fuera · `remember` aislado |
+| `QueueTenancyTest` | el job conserva su tenant · no hereda el del worker · **el worker no contamina entre jobs** · dispatch con arrow function · job de tenant borrado no corre |
+| `HttpTenancyTest` | resolución por dominio y subdominio · 404 si no existe · 403 si inactivo · dominio central bloqueado · **sesión cruzada descartada** |
+| `SurfacesTest` | storage aislado y nombrado por subdominio · `Tenancy::unique()` por tenant · canales de broadcasting · `Tenancy::each()` (contexto, tolerancia a fallos, ignora inactivos) |
+
+Los tests corren contra **MySQL** (no sqlite) porque el aislamiento de storage y colas necesita el
+comportamiento real del motor.
+
 ## Reglas de esquema (responsabilidad de la app)
 
 1. Toda tabla de negocio: `tenant_id` con FK a `tenants` + `cascadeOnDelete`.
