@@ -29,6 +29,13 @@ class ScopeSessionToTenant
             return $next($request);
         }
 
+        // Request sin sesión (API stateless con Bearer): no hay cookie que pueda viajar a otro
+        // subdominio, así que no hay nada que atar. Sin esto, el grupo `tenant` no se puede usar
+        // en rutas `api` — reventaría con "Session store not set on request".
+        if (! $request->hasSession()) {
+            return $next($request);
+        }
+
         $sessionTenant = $request->session()->get(self::KEY);
 
         if ($sessionTenant === null) {

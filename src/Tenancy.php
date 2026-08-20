@@ -4,6 +4,7 @@ namespace Esolutions\Tenancy;
 
 use Esolutions\Tenancy\Contracts\Tenant;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
@@ -94,6 +95,32 @@ class Tenancy
     {
         return Rule::exists($table, $column)
             ->where(config('tenancy.column', 'tenant_id'), app(TenantContext::class)->idOrFail());
+    }
+
+    /**
+     * Query builder CRUDO ya acotado al tenant actual.
+     *
+     * `DB::table('items')` no pasa por el TenantScope —el scope es de Eloquent— así que devuelve
+     * filas de TODAS las empresas. Es la fuga más probable en single-DB y la más fácil de escribir
+     * sin darse cuenta.
+     *
+     * ```php
+     * Tenancy::table('items')->where('active', 1)->get();     // en vez de DB::table('items')
+     * Tenancy::table('items')->insert(['description' => 'X']); // el tenant_id va solo
+     * ```
+     *
+     * Falla cerrado: sin tenant en contexto lanza excepción (`idOrFail`) en vez de devolver todo.
+     * Para lo deliberadamente cross-tenant está `TenantContext::runAsSystem()`.
+     *
+     * El `where` va calificado con el nombre de la tabla para que no se vuelva ambiguo al hacer
+     * `join` con otra tabla que también tenga la columna.
+     */
+    public static function table(string $table): QueryBuilder
+    {
+        $columna = config('tenancy.column', 'tenant_id');
+        $id = app(TenantContext::class)->idOrFail();
+
+        return app('db')->table($table)->where("{$table}.{$columna}", $id);
     }
 
     /**
