@@ -120,7 +120,11 @@ class Tenancy
         $columna = config('tenancy.column', 'tenant_id');
         $id = app(TenantContext::class)->idOrFail();
 
-        return app('db')->table($table)->where("{$table}.{$columna}", $id);
+        // Si viene con alias (`'items as c'`) hay que calificar con el ALIAS: es lo único que SQL
+        // reconoce a esa altura de la query. Con el nombre completo daría `items as c`.`tenant_id`.
+        $prefijo = preg_split('/\s+as\s+/i', trim($table))[1] ?? trim($table);
+
+        return app('db')->table($table)->where("{$prefijo}.{$columna}", $id);
     }
 
     /**

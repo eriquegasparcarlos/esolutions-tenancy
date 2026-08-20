@@ -68,6 +68,20 @@ class RawQueryTest extends TestCase
         Tenancy::table('posts')->get();
     }
 
+    public function test_con_alias_califica_con_el_alias_no_con_la_tabla(): void
+    {
+        $this->sembrar();
+
+        // Los DataTables portados de v2 escriben `table('items as c')->join(...)`. Calificar con el
+        // nombre completo generaría `items as c`.`tenant_id`, que es SQL inválido.
+        $filas = $this->context()->runAs(
+            $this->acme,
+            fn () => Tenancy::table('posts as p')->pluck('p.title')->all()
+        );
+
+        $this->assertSame(['De Acme'], $filas);
+    }
+
     public function test_la_columna_va_calificada_para_no_romper_los_joins(): void
     {
         // Sin calificar, un join contra otra tabla con `tenant_id` daría "Column 'tenant_id' in
