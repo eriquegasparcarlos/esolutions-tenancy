@@ -3,6 +3,7 @@
 namespace Esolutions\Tenancy\Tests;
 
 use Esolutions\Tenancy\Http\Middleware\ScopeSessionToTenant;
+use Illuminate\Support\Facades\Auth;
 use Esolutions\Tenancy\TenantContext;
 use Illuminate\Support\Facades\Route;
 
@@ -58,6 +59,33 @@ class HttpTenancyTest extends TestCase
     {
         // Cookie emitida en Acme, presentada en el dominio de Globex (las cookies se comparten
         // entre subdominios de un mismo dominio padre).
+        $this->withSession([
+            ScopeSessionToTenant::KEY => $this->acme->id,
+            'dato_de_acme' => 'secreto',
+        ])->get('http://globex.test/whoami')->assertOk();
+
+        $this->assertSame($this->globex->id, session(ScopeSessionToTenant::KEY));
+        $this->assertNull(session('dato_de_acme'), 'La sesión de otro tenant sobrevivió.');
+    }
+
+    /**
+     * Descartar la sesión ajena no puede depender de que el guard por defecto sea de sesión.
+     *
+     * `auth:web,api` deja como default al guard que autenticó, así que en una app con Bearer el
+     * default termina siendo un TokenGuard — que no tiene `logout()`. Antes eso tumbaba el request
+     * entero con BadMethodCallException justo en el momento en que había que proteger la sesión.
+     */
+    public function test_descarta_la_sesion_ajena_aunque_el_guard_por_defecto_no_sea_de_sesion(): void
+    {
+        config()->set('auth.guards.api', [
+            'driver' => 'token',
+            'provider' => 'users',
+            'storage_key' => 'api_token',
+            'hash' => false,
+        ]);
+
+        Auth::shouldUse('api');
+
         $this->withSession([
             ScopeSessionToTenant::KEY => $this->acme->id,
             'dato_de_acme' => 'secreto',

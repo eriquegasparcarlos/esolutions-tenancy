@@ -4,6 +4,7 @@ namespace Esolutions\Tenancy\Http\Middleware;
 
 use Closure;
 use Esolutions\Tenancy\TenantContext;
+use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
@@ -46,7 +47,19 @@ class ScopeSessionToTenant
 
         if ((string) $sessionTenant !== (string) $tenantId) {
             // La sesión viene de OTRA empresa: se descarta por completo.
-            Auth::guard()->logout();
+            //
+            // El logout solo aplica a los guards de sesión. `Auth::guard()` devuelve el guard por
+            // DEFECTO, y ese no siempre es uno: el middleware `auth:web,api` deja como default al
+            // que autenticó, así que en una app con Bearer puede ser un TokenGuard, que no tiene
+            // `logout()` y revienta con BadMethodCallException. Lo que de verdad corta la sesión
+            // es el flush + regenerate de abajo; el logout es para el usuario ya resuelto en
+            // memoria.
+            $guard = Auth::guard();
+
+            if ($guard instanceof StatefulGuard) {
+                $guard->logout();
+            }
+
             $request->session()->flush();
             $request->session()->regenerate(true);
             $request->session()->put(self::KEY, $tenantId);
