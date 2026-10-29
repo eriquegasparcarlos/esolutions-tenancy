@@ -154,6 +154,23 @@ class MultiDatabaseTest extends MultiDatabaseTestCase
         $this->context()->forget();
     }
 
+    public function test_un_alias_registrado_con_extend_sigue_a_la_conexion_por_defecto(): void
+    {
+        // Como el `tenant` heredado de qpospe: un alias que resuelve a la conexión por defecto.
+        config()->set('database.connections.tenant', config('database.connections.testing'));
+        config()->set('tenancy.database.alias_connections', ['tenant']);
+        DB::extend('tenant', fn () => DB::connection());
+
+        $this->assertSame($this->central(), DB::connection('tenant')->getDatabaseName());
+
+        $this->context()->runAs($this->initech, function () {
+            $this->assertSame($this->secondary, DB::connection('tenant')->getDatabaseName(), 'Sin olvidar el alias cacheado, seguiría apuntando a la central.');
+            $this->assertSame(DB::connection(), DB::connection('tenant'), 'Tiene que ser la MISMA instancia que usan los modelos, o una transacción sobre el alias no los cubre.');
+        });
+
+        $this->assertSame($this->central(), DB::connection('tenant')->getDatabaseName());
+    }
+
     // ── HTTP ───────────────────────────────────────────────────────────────────
 
     public function test_la_request_al_dominio_del_tenant_llega_a_su_base(): void

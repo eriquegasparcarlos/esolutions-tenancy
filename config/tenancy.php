@@ -120,6 +120,11 @@ return [
         // Nombre de la conexión que el paquete registra para la base del tenant en contexto.
         'connection_name' => 'tenant_db',
 
+        // Alias registrados con `DB::extend()` que deben SEGUIR a la conexión por defecto (p. ej.
+        // un `tenant` heredado que resuelve a `DB::connection()`): se olvidan del cache del manager
+        // en cada conmutación para que vuelvan a resolverse.
+        'alias_connections' => [],
+
         // Conexión fija a la base central. NULL = la conexión por defecto original de la app.
         'central_connection' => env('TENANCY_CENTRAL_CONNECTION'),
 

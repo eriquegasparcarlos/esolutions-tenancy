@@ -102,6 +102,7 @@ Si preferís no extender los modelos base, alcanza con implementar
 | `database.enabled` | `true` | habilita la base por tenant (con `false` se ignora `tenants.database`) |
 | `database.column` | `database` | columna del tenant con el nombre de su base (`NULL` = base compartida) |
 | `database.connection_name` | `tenant_db` | conexión que el paquete registra para la base del tenant en contexto |
+| `database.alias_connections` | `[]` | alias registrados con `DB::extend()` que deben seguir a la conexión por defecto (se olvidan del cache en cada conmutación) |
 | `database.central_connection` | `null` | conexión fija a la central (`null` = la conexión por defecto original) |
 | `database.template_connection` | `null` | conexión cuya config se clona para la del tenant (`null` = la central) |
 | `database.schema_path` | `null` | dump con el que `tenants:migrate` levanta una base nueva (`null` = el de Laravel para la central) |
@@ -221,6 +222,11 @@ punto de entrada.
   bases, y `t1:` sería la misma clave para la empresa 1 de dos bases distintas.
 - Cada base propia lleva una **fila espejo** del tenant en su tabla `tenants`, para que la FK
   `tenant_id → tenants.id` de las tablas de negocio cierre. La escribe `mirror()` / `provision()`.
+- Un alias heredado como `DB::connection('tenant')`, registrado con
+  `DB::extend('tenant', fn () => DB::connection())`, **sigue a la base en contexto** si se lo
+  declara en `database.alias_connections`: el manager cachea lo que devuelve el resolver, y sin
+  esto el alias seguiría apuntando a la base de antes. Se olvida la entrada cacheada, no se
+  purga (purgar cerraría el PDO de la conexión por defecto, que es la misma instancia).
 
 **Alta y migración de una base propia:**
 
@@ -317,7 +323,7 @@ suite (orchestra/testbench) para que un refactor futuro no rompa el aislamiento 
 composer install
 mysql -e "CREATE DATABASE esolutions_tenancy_test"
 mysql -e "CREATE DATABASE esolutions_tenancy_test_b"   # base propia de un tenant, para la parte multi-base
-vendor/bin/phpunit          # 65 tests
+vendor/bin/phpunit          # 66 tests
 ```
 
 | Archivo | Qué garantiza |
@@ -328,7 +334,7 @@ vendor/bin/phpunit          # 65 tests
 | `HttpTenancyTest` | resolución por dominio y subdominio · 404 si no existe · 403 si inactivo · dominio central bloqueado · **sesión cruzada descartada** |
 | `SurfacesTest` | storage aislado y nombrado por subdominio · `Tenancy::unique()` por tenant · canales de broadcasting · `Tenancy::each()` (contexto, tolerancia a fallos, ignora inactivos) |
 | `RawQueryTest` | `Tenancy::table()` acota el builder crudo al tenant · califica con el alias · fail-closed sin contexto |
-| `MultiDatabaseTest` | un tenant sin base se queda en la central · `runAs` conecta a la base propia y **vuelve** · los modelos leen/escriben en la base del tenant y otro tenant no las ve · anidado restaura · `Tenant`/`Domain` siempre de la central · se niega a cambiar con transacción abierta · prefijo de cache con base · request HTTP y job de cola llegan a su base |
+| `MultiDatabaseTest` | un tenant sin base se queda en la central · `runAs` conecta a la base propia y **vuelve** · los modelos leen/escriben en la base del tenant y otro tenant no las ve · anidado restaura · `Tenant`/`Domain` siempre de la central · se niega a cambiar con transacción abierta · prefijo de cache con base · un alias con `extend()` sigue a la base en contexto · request HTTP y job de cola llegan a su base |
 | `TenantDatabaseManagerTest` | crear/verificar/borrar · rechaza nombres no identificadores · se niega a borrar la central · `provision` migra y deja la fila espejo · `migrate` sin base propia falla claro |
 
 Las clases multi-base no usan `RefreshDatabase` (el conmutador se niega a cambiar de base con una

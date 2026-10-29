@@ -106,6 +106,7 @@ class TenantDatabaseSwitcher
         // PDO viejo seguiría hablando con la base anterior.
         $db->purge($nombre);
         $db->setDefaultConnection($nombre);
+        $this->forgetAliases($db);
 
         $this->current = $database;
     }
@@ -122,8 +123,36 @@ class TenantDatabaseSwitcher
         $db = $this->app['db'];
         $db->setDefaultConnection($this->centralConnection());
         $db->purge($this->tenantConnection());
+        $this->forgetAliases($db);
 
         $this->current = null;
+    }
+
+    /**
+     * Alias que deben SEGUIR a la conexión por defecto (`tenancy.database.alias_connections`).
+     *
+     * Caso típico: código heredado que escribe `DB::connection('tenant')` a mano, con `tenant`
+     * registrado vía `DB::extend('tenant', fn () => DB::connection())`. El manager cachea lo que
+     * devuelve ese resolver, así que después de conmutar el alias seguiría entregando la conexión
+     * de ANTES. Acá se olvida la entrada cacheada para que la próxima llamada vuelva a resolverse.
+     *
+     * No se usa `purge()`: purge desconecta el PDO, y como el alias es la MISMA instancia que la
+     * conexión por defecto, le cerraría la conexión a esta (y a su transacción, si tuviera). Solo
+     * se suelta la referencia; la conexión real sigue viva bajo su propio nombre.
+     */
+    private function forgetAliases($db): void
+    {
+        $aliases = (array) $this->app['config']->get('tenancy.database.alias_connections', []);
+
+        if (! $aliases) {
+            return;
+        }
+
+        (function () use ($aliases) {
+            foreach ($aliases as $alias) {
+                unset($this->connections[$alias]);
+            }
+        })->call($db);
     }
 
     /**

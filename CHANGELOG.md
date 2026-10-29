@@ -19,9 +19,12 @@
 - Prefijo de cache `d{base}:t{id}:` cuando el tenant tiene base propia: los ids se repiten entre
   bases y `t{id}:` dejaba de aislar.
 - `Contracts\Tenant` suma `getTenantDatabase(): ?string`.
+- `database.alias_connections`: alias registrados con `DB::extend()` (el `tenant` heredado de
+  qpospe) que se olvidan del cache del manager en cada conmutación, para que sigan a la base en
+  contexto sin purgar la conexión real.
 - Config nueva: bloque `database` (`enabled`, `column`, `connection_name`, `central_connection`,
   `template_connection`, `schema_path`, `charset`, `collation`, `name_prefix`).
-- Suite: 65 tests. `MultiDatabaseTest` (9) y `TenantDatabaseManagerTest` (6) corren contra dos
+- Suite: 66 tests. `MultiDatabaseTest` (9) y `TenantDatabaseManagerTest` (6) corren contra dos
   bases reales (`DB_DATABASE_SECONDARY`), sin `RefreshDatabase`, y vacían la central al terminar.
 
 ### Query builder crudo acotado al tenant
