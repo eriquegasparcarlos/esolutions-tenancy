@@ -27,12 +27,15 @@ class TenantAwareStore implements Store
         private readonly TenantContext $context,
     ) {}
 
-    /** Prefijo de la clave para el tenant actual (vacío si no hay tenant en contexto). */
+    /**
+     * Prefijo de la clave para el tenant actual (vacío si no hay tenant en contexto).
+     *
+     * Lo arma el contexto: con base por tenant los ids se repiten entre bases, y `t{id}:` solo
+     * dejaría de aislar — dos empresas con id 1 en bases distintas compartirían claves.
+     */
     private function tenantPrefix(): string
     {
-        $id = $this->context->id();
-
-        return $id === null ? '' : "t{$id}:";
+        return $this->context->cachePrefix();
     }
 
     private function key(string $key): string

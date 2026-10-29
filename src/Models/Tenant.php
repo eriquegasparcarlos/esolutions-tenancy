@@ -20,7 +20,7 @@ class Tenant extends Model implements TenantContract
 {
     use SoftDeletes;
 
-    protected $fillable = ['name', 'slug', 'is_active', 'data'];
+    protected $fillable = ['name', 'slug', 'is_active', 'data', 'database'];
 
     protected function casts(): array
     {
@@ -38,6 +38,24 @@ class Tenant extends Model implements TenantContract
     public function isTenantActive(): bool
     {
         return (bool) $this->is_active;
+    }
+
+    public function getTenantDatabase(): ?string
+    {
+        $columna = config('tenancy.database.column', 'database');
+
+        return $this->{$columna} ?: null;
+    }
+
+    /**
+     * El tenant se lee SIEMPRE de la base central, aunque la conexión por defecto esté apuntando a
+     * la base de un tenant. Resolver «quién es este tenant» desde la base de otro sería leer su
+     * copia espejo (la fila que cada base propia lleva para que las FK de negocio cierren), no la
+     * verdad del plano de control.
+     */
+    public function getConnectionName()
+    {
+        return app(\Esolutions\Tenancy\Database\TenantDatabaseSwitcher::class)->centralConnection();
     }
 
     public function domains(): HasMany

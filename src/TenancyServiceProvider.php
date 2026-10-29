@@ -3,7 +3,10 @@
 namespace Esolutions\Tenancy;
 
 use Esolutions\Tenancy\Cache\TenantAwareCacheManager;
+use Esolutions\Tenancy\Console\TenantsMigrateCommand;
 use Esolutions\Tenancy\Console\TenantsRunCommand;
+use Esolutions\Tenancy\Database\TenantDatabaseManager;
+use Esolutions\Tenancy\Database\TenantDatabaseSwitcher;
 use Esolutions\Tenancy\Filesystem\TenantFilesystemManager;
 use Esolutions\Tenancy\Http\Middleware\PreventAccessFromCentralDomain;
 use Esolutions\Tenancy\Http\Middleware\ResolveTenant;
@@ -19,6 +22,9 @@ class TenancyServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/tenancy.php', 'tenancy');
 
+        // El conmutador va ANTES que el contexto: el contexto lo recibe en su constructor.
+        $this->app->singleton(TenantDatabaseSwitcher::class);
+        $this->app->singleton(TenantDatabaseManager::class);
         $this->app->singleton(TenantContext::class);
 
         $this->registerCacheManager();
@@ -40,7 +46,7 @@ class TenancyServiceProvider extends ServiceProvider
         $this->registerResolutionCacheInvalidation();
 
         if ($this->app->runningInConsole()) {
-            $this->commands([TenantsRunCommand::class]);
+            $this->commands([TenantsRunCommand::class, TenantsMigrateCommand::class]);
         }
     }
 

@@ -95,4 +95,46 @@ return [
         'path_prefix' => 'tenants/{slug}',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Base por tenant (opcional, convive con el modelo single-DB)
+    |--------------------------------------------------------------------------
+    | Un tenant con valor en `tenants.database` vive en ESA base; con NULL vive en la central,
+    | separado por `tenant_id` como siempre. `tenant_id` se conserva en los dos casos: el código de
+    | negocio no distingue en qué base está, y una base puede tener una empresa o varias.
+    |
+    | Al entrar un tenant con base propia se registra una conexión (`connection_name`) clonada de
+    | `template_connection` con su nombre de base, y pasa a ser la conexión POR DEFECTO. La
+    | central no se toca ni se purga: las transacciones abiertas sobre ella siguen vivas, y los
+    | modelos —que usan la conexión por defecto— pasan solos a la base del tenant.
+    |
+    | Los modelos de tenant y dominio leen SIEMPRE de `central_connection`: resolver «quién es
+    | este tenant» desde la base de otro tenant sería leer una copia espejo, nunca la verdad.
+    */
+    'database' => [
+        'enabled' => env('TENANCY_DATABASE_ENABLED', true),
+
+        // Columna del modelo de tenant con el nombre de su base (NULL = base compartida).
+        'column' => 'database',
+
+        // Nombre de la conexión que el paquete registra para la base del tenant en contexto.
+        'connection_name' => 'tenant_db',
+
+        // Conexión fija a la base central. NULL = la conexión por defecto original de la app.
+        'central_connection' => env('TENANCY_CENTRAL_CONNECTION'),
+
+        // Conexión cuya configuración se clona para la del tenant. NULL = la central.
+        'template_connection' => null,
+
+        // Dump de esquema con el que `tenants:migrate` levanta una base nueva. NULL = el de Laravel
+        // para la conexión central (database/schema/<conexión>-schema.sql) si existe.
+        'schema_path' => null,
+
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+
+        // Prefijo para nombrar bases nuevas: <prefix><slug>.
+        'name_prefix' => env('TENANCY_DATABASE_PREFIX', 'tenant_'),
+    ],
+
 ];

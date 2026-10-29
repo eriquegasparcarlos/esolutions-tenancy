@@ -1,10 +1,12 @@
 # esolutions/tenancy
 
-Multi-tenancy **single-database** para Laravel: aislamiento row-level *fail-closed*, resolución por
-dominio y scoping de sesión.
+Multi-tenancy para Laravel con aislamiento row-level *fail-closed*, resolución por dominio y
+scoping de sesión. **Single-database por defecto, con base por tenant opcional.**
 
-Todos los tenants comparten las mismas tablas y el dato se separa por `tenant_id`. **No hay una base
-por tenant, no hay migraciones ×N y dar de alta una empresa es insertar una fila.**
+Todos los tenants comparten las mismas tablas y el dato se separa por `tenant_id`: dar de alta una
+empresa es insertar una fila. Si un cliente necesita su propia base, se le asigna una en
+`tenants.database` y el paquete conecta a ella al entrar el tenant — **conservando `tenant_id`**,
+así que el código de negocio es el mismo en los dos casos (ver [Base por tenant](#6-base-por-tenant-opcional)).
 
 ## Por qué existe
 
@@ -28,6 +30,12 @@ motor crece con el número de clientes (`empresas × tablas`). MySQL dimensiona
 `table_definition_cache` / `open_files_limit` por **tablas abiertas**, no por filas — al superarlo
 aparecen errores `1615 Prepared statement needs to be re-prepared`. Con single-DB el número de
 tablas es **fijo**.
+
+Cuando igual hace falta una base aparte (un cliente que exige sus datos físicamente separados, un
+respaldo propio, una migración de un sistema que ya venía con una base por empresa), el paquete la
+soporta **sin cambiar el modelo**: el tenant sigue teniendo `tenant_id`, el scope sigue siendo
+fail-closed, y lo único que cambia es a qué base apunta la conexión por defecto mientras ese tenant
+está en contexto. Una base puede tener una empresa o varias.
 
 ## Requisitos
 
@@ -91,6 +99,13 @@ Si preferís no extender los modelos base, alcanza con implementar
 | `base_domain` | `localhost` | dominio base de los subdominios (`acme.<base>`) |
 | `central_domains` | `localhost,127.0.0.1` | dominios del panel del proveedor |
 | `middleware_group` | `tenant` | nombre del grupo de middleware que registra el paquete |
+| `database.enabled` | `true` | habilita la base por tenant (con `false` se ignora `tenants.database`) |
+| `database.column` | `database` | columna del tenant con el nombre de su base (`NULL` = base compartida) |
+| `database.connection_name` | `tenant_db` | conexión que el paquete registra para la base del tenant en contexto |
+| `database.central_connection` | `null` | conexión fija a la central (`null` = la conexión por defecto original) |
+| `database.template_connection` | `null` | conexión cuya config se clona para la del tenant (`null` = la central) |
+| `database.schema_path` | `null` | dump con el que `tenants:migrate` levanta una base nueva (`null` = el de Laravel para la central) |
+| `database.name_prefix` | `tenant_` | prefijo al nombrar bases nuevas: `<prefix><slug>` |
 
 ## Uso
 
@@ -183,6 +198,61 @@ directorio temporal:
 config()->set('filesystems.disks.local.root', storage_path('framework/testing/disks/'.uniqid()));
 ```
 
+### 6. Base por tenant (opcional)
+
+Un tenant con valor en `tenants.database` vive en ESA base; con `NULL` vive en la central, separado
+por `tenant_id` como siempre. Los dos modelos conviven en la misma instalación.
+
+**Cómo funciona.** Cada vez que cambia el tenant en contexto —`ResolveTenant`, `runAs()`,
+`runAsSystem()`, el worker de colas, `forget()`— el contexto le pide a `TenantDatabaseSwitcher` que
+conecte a la base del tenant. El conmutador registra una conexión (`tenant_db`) clonada de la
+central con el nombre de base del tenant y la vuelve **conexión por defecto**. La central no se toca
+ni se purga, así que una transacción abierta sobre ella sigue viva. Al salir del tenant se vuelve a
+la central y se cierra la conexión del tenant. Es un solo gancho, en `TenantContext`, y no uno por
+punto de entrada.
+
+**Reglas que el paquete hace cumplir:**
+
+- `Tenant` y `Domain` se leen **siempre** de la central (`database.central_connection`). Resolver
+  «quién es este tenant» desde la base de otro sería leer una copia espejo, nunca la verdad.
+- **No se cambia de base con una transacción abierta** sobre la conexión que se abandona: lanza
+  `RuntimeException`. Si no, la transacción quedaría colgada en una conexión que ya nadie mira.
+- El prefijo de cache pasa a ser `d{base}:t{id}:`: con base por tenant los ids se repiten entre
+  bases, y `t1:` sería la misma clave para la empresa 1 de dos bases distintas.
+- Cada base propia lleva una **fila espejo** del tenant en su tabla `tenants`, para que la FK
+  `tenant_id → tenants.id` de las tablas de negocio cierre. La escribe `mirror()` / `provision()`.
+
+**Alta y migración de una base propia:**
+
+```php
+use Esolutions\Tenancy\Database\TenantDatabaseManager;
+
+$tenant = Tenant::create(['name' => 'Initech', 'slug' => 'initech', 'database' => 'tenant_initech']);
+
+// crea la base si no existe → migra (dump de esquema + migraciones) → fila espejo
+app(TenantDatabaseManager::class)->provision($tenant);
+```
+
+```bash
+php artisan tenants:migrate                        # migra la base de cada tenant que tenga una
+php artisan tenants:migrate --tenants=3,7 --create # crea las que falten antes de migrar
+```
+
+`migrate()` delega en `php artisan migrate --database=tenant_db`, así que una base vacía arranca del
+dump de esquema igual que la central. Ojo: Laravel busca el dump **por nombre de conexión**
+(`database/schema/<conexión>-schema.sql`); si el de la app lleva el nombre de la central, indicarlo
+en `database.schema_path`.
+
+**Lo que queda del lado de la app:**
+
+- **Colas**: clavar la conexión del driver `database` a la central (`DB_QUEUE_CONNECTION`). Si
+  siguiera la conexión por defecto, un job despachado desde un tenant con base propia se encolaría
+  en SU base y el worker, que escucha la central, nunca lo vería.
+- **Tablas del plano de control** (planes, módulos contratados, menú compartido): leerlas por la
+  conexión central explícita, no por la por defecto.
+- **Catálogos globales** que las tablas de negocio referencian por FK: replicarlos en cada base al
+  darla de alta.
+
 ## Superficies compartidas de Laravel — auditoría completa
 
 En single-DB no alcanza con filtrar la base de datos. Laravel tiene varias superficies **globales**
@@ -246,7 +316,8 @@ suite (orchestra/testbench) para que un refactor futuro no rompa el aislamiento 
 ```bash
 composer install
 mysql -e "CREATE DATABASE esolutions_tenancy_test"
-vendor/bin/phpunit          # 37 tests
+mysql -e "CREATE DATABASE esolutions_tenancy_test_b"   # base propia de un tenant, para la parte multi-base
+vendor/bin/phpunit          # 65 tests
 ```
 
 | Archivo | Qué garantiza |
@@ -256,6 +327,14 @@ vendor/bin/phpunit          # 37 tests
 | `QueueTenancyTest` | el job conserva su tenant · no hereda el del worker · **el worker no contamina entre jobs** · dispatch con arrow function · job de tenant borrado no corre |
 | `HttpTenancyTest` | resolución por dominio y subdominio · 404 si no existe · 403 si inactivo · dominio central bloqueado · **sesión cruzada descartada** |
 | `SurfacesTest` | storage aislado y nombrado por subdominio · `Tenancy::unique()` por tenant · canales de broadcasting · `Tenancy::each()` (contexto, tolerancia a fallos, ignora inactivos) |
+| `RawQueryTest` | `Tenancy::table()` acota el builder crudo al tenant · califica con el alias · fail-closed sin contexto |
+| `MultiDatabaseTest` | un tenant sin base se queda en la central · `runAs` conecta a la base propia y **vuelve** · los modelos leen/escriben en la base del tenant y otro tenant no las ve · anidado restaura · `Tenant`/`Domain` siempre de la central · se niega a cambiar con transacción abierta · prefijo de cache con base · request HTTP y job de cola llegan a su base |
+| `TenantDatabaseManagerTest` | crear/verificar/borrar · rechaza nombres no identificadores · se niega a borrar la central · `provision` migra y deja la fila espejo · `migrate` sin base propia falla claro |
+
+Las clases multi-base no usan `RefreshDatabase` (el conmutador se niega a cambiar de base con una
+transacción abierta): migran las dos bases en limpio en cada `setUp` y **vacían la central en
+`tearDown`**, porque las clases que vienen después sí usan `RefreshDatabase`, que migra una sola vez
+por proceso y confía en que la base está vacía.
 
 Los tests corren contra **MySQL** (no sqlite) porque el aislamiento de storage y colas necesita el
 comportamiento real del motor.
@@ -269,7 +348,8 @@ comportamiento real del motor.
 4. **Queries crudas** (`DB::table`, `DB::raw`) NO pasan por el scope → agregar
    `where('tenant_id', ...)` a mano. Es la fuga más probable; auditar con grep.
 5. La tabla `tenants` debe vivir en la **misma base** que las de negocio: MySQL no soporta FK entre
-   esquemas, así que un control-plane en otra base impediría la FK `tenant_id → tenants.id`.
+   esquemas, así que un control-plane en otra base impediría la FK `tenant_id → tenants.id`. Con
+   base por tenant eso se resuelve con la fila espejo que deja `provision()` / `mirror()`.
 6. Tests de aislamiento por módulo (tenant A no ve a B).
 
 ## Regla de oro
@@ -281,7 +361,9 @@ Efecto lateral: protege contra IDOR gratis — si cambian el ID en la URL por un
 
 ## Qué NO hace este paquete
 
-- No crea bases de datos ni corre migraciones por tenant (no hace falta: es single-DB).
+- No decide qué tenant lleva base propia: eso es política de la app (plan contratado, pedido del
+  cliente). El paquete solo conecta a la que diga `tenants.database`.
+- No replica catálogos ni datos compartidos entre bases: la app los siembra al dar de alta.
 - No gestiona planes, facturación del SaaS ni módulos contratados — eso es política de la app.
 - No provee panel de administración.
 

@@ -16,5 +16,6 @@
     </source>
     <php>
         <env name="DB_DATABASE" value="esolutions_tenancy_test"/>
+        <env name="DB_DATABASE_SECONDARY" value="esolutions_tenancy_test_b"/>
     </php>
 </phpunit>

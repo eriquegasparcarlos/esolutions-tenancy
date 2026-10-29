@@ -1,5 +1,40 @@
 # Changelog
 
+## Sin publicar
+
+### Base por tenant opcional (conservando `tenant_id`)
+
+- `tenants.database` (nullable, migración `add_database_to_tenants`): con valor, el tenant vive en
+  esa base; con `NULL` sigue en la central separado por `tenant_id`. Los dos modelos conviven.
+- `TenantDatabaseSwitcher`: al entrar un tenant con base propia registra una conexión `tenant_db`
+  clonada de la central y la vuelve conexión por defecto; al salir vuelve a la central y la cierra.
+  La central no se purga nunca. Se niega a cambiar de base con una transacción abierta.
+- `TenantContext` aplica la conmutación en `set()`, `forget()`, `runAs()` y `runAsSystem()` — un
+  solo gancho para HTTP, jobs y comandos. Si conectar falla, el contexto vuelve al tenant anterior.
+- `Tenant` y `Domain` leen siempre de la conexión central (`database.central_connection`).
+- `TenantDatabaseManager`: `create` / `exists` / `drop` (se niega con la central) / `migrate`
+  (delega en `migrate --database=tenant_db`, con dump de esquema) / `mirror` (fila espejo del tenant
+  en su base, para que cierre la FK `tenant_id`) / `provision` (los tres).
+- Comando `tenants:migrate {--tenants=} {--create} {--stop-on-error}`.
+- Prefijo de cache `d{base}:t{id}:` cuando el tenant tiene base propia: los ids se repiten entre
+  bases y `t{id}:` dejaba de aislar.
+- `Contracts\Tenant` suma `getTenantDatabase(): ?string`.
+- Config nueva: bloque `database` (`enabled`, `column`, `connection_name`, `central_connection`,
+  `template_connection`, `schema_path`, `charset`, `collation`, `name_prefix`).
+- Suite: 65 tests. `MultiDatabaseTest` (9) y `TenantDatabaseManagerTest` (6) corren contra dos
+  bases reales (`DB_DATABASE_SECONDARY`), sin `RefreshDatabase`, y vacían la central al terminar.
+
+### Query builder crudo acotado al tenant
+
+- `Tenancy::table('tabla')` devuelve un query builder ya filtrado por el tenant en contexto
+  (fail-closed sin contexto), para las queries que no pasan por Eloquent. Califica el `where` con
+  el alias cuando la tabla lo trae (`'documents as d'`).
+
+### Fixes
+
+- `ScopeSessionToTenant` deja pasar las peticiones sin sesión (rutas API con `auth:api` o sin
+  `StartSession`): antes tiraba al pedir la sesión en una request que no la tenía.
+
 ## 0.1.0 — 2026-08-16
 
 Versión inicial, extraída de qpospev3 antes de que el proyecto creciera (adopción ~0, costo de

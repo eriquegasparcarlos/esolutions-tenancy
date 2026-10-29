@@ -15,4 +15,10 @@ interface Tenant
 
     /** Si es false, el middleware de resolución rechaza la request. */
     public function isTenantActive(): bool;
+
+    /**
+     * Nombre de la base propia del tenant, o null si vive en la base compartida (separado solo
+     * por `tenant_id`). Decide a qué base se conecta el contexto al entrar el tenant.
+     */
+    public function getTenantDatabase(): ?string;
 }

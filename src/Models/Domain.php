@@ -22,4 +22,10 @@ class Domain extends Model
     {
         return $this->belongsTo(config('tenancy.tenant_model'));
     }
+
+    /** Igual que el tenant: el dominio es plano de control y se lee siempre de la central. */
+    public function getConnectionName()
+    {
+        return app(\Esolutions\Tenancy\Database\TenantDatabaseSwitcher::class)->centralConnection();
+    }
 }
