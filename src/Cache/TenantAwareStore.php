@@ -146,6 +146,29 @@ class TenantAwareStore implements Store
         return $this->store->tags($names);
     }
 
+    /**
+     * Laravel configura así el store de Redis al armar las sesiones (`SessionManager::createRedisDriver`): sin esto, con
+     * `SESSION_DRIVER=redis` la aplicación no arrancaba. No tocan claves: van directo al store real.
+     */
+    public function setConnection($connection)
+    {
+        return $this->delegarAlStore('setConnection', $connection);
+    }
+
+    public function setPrefix($prefix)
+    {
+        return $this->delegarAlStore('setPrefix', $prefix);
+    }
+
+    private function delegarAlStore(string $metodo, mixed $valor): mixed
+    {
+        if (! method_exists($this->store, $metodo)) {
+            throw new \BadMethodCallException("This cache store does not support {$metodo}().");
+        }
+
+        return $this->store->{$metodo}($valor);
+    }
+
     /** Acceso al store real (p. ej. para features específicas del driver). */
     public function getInnerStore(): Store
     {

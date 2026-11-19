@@ -2,6 +2,8 @@
 
 namespace Esolutions\Tenancy\Tests;
 
+use Esolutions\Tenancy\Cache\TenantAwareStore;
+use Illuminate\Cache\ArrayStore;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 
@@ -11,6 +13,39 @@ use RuntimeException;
  */
 class CacheIsolationTest extends TestCase
 {
+    public function test_las_sesiones_en_redis_pueden_configurar_el_store_real(): void
+    {
+        $real = new class extends ArrayStore {
+            public ?string $conexion = null;
+
+            public ?string $prefijo = null;
+
+            public function setConnection($connection): void
+            {
+                $this->conexion = $connection;
+            }
+
+            public function setPrefix($prefix): void
+            {
+                $this->prefijo = $prefix;
+            }
+        };
+        $store = new TenantAwareStore($real, $this->context());
+
+        $store->setConnection('sesiones');
+        $store->setPrefix('s:');
+
+        $this->assertSame('sesiones', $real->conexion);
+        $this->assertSame('s:', $real->prefijo);
+    }
+
+    public function test_un_store_sin_conexiones_lo_dice_claro(): void
+    {
+        $this->expectException(\BadMethodCallException::class);
+
+        (new TenantAwareStore(new ArrayStore(), $this->context()))->setConnection('sesiones');
+    }
+
     public function test_el_cache_no_se_comparte_entre_tenants(): void
     {
         $this->context()->runAs($this->acme, fn () => Cache::put('stats', 'datos-de-acme', 60));
