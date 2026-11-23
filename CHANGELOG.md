@@ -1,6 +1,6 @@
 # Changelog
 
-## Sin publicar
+## 0.5.0 — 2026-11-23
 
 ### Base por tenant opcional (conservando `tenant_id`)
 
